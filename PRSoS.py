@@ -24,7 +24,7 @@ import argparse
 #matplotlib.use('Agg')
 #import matplotlib.pyplot as plt
 #import numpy as np
-#import pandas as pd
+# import pandas as pd
 #
 #from plottings import *
 #import statsmodels.formula.api as smf
@@ -97,7 +97,12 @@ def filterGWASByP(GWASRdd, pcolumn,  pHigh, oddscolumn,idcolumn, pLow=0, logOdds
 
 
 def filterGWASByP_DF(GWASdf, pcolumn,  pHigh, oddscolumn,idcolumn, pLow=0, logOdds=False):
-    GWAS_Pfiltered=GWASdf.rdd.filter(lambda line: (float(line[pcolumn])<=pHigh) and (float(line[pcolumn])>=pLow))
+    # edited by EG - start
+    if pHigh<1:
+        GWAS_Pfiltered=GWASdf.rdd.filter(lambda line: (float(line[pcolumn])<=pHigh) and (float(line[pcolumn])>=pLow))
+    else:
+        GWAS_Pfiltered=GWASdf
+    # edited by EG - end
     if logOdds:
         GWAS_Odds=GWAS_Pfiltered.map(lambda line: (line[idcolumn],log(float(line[oddscolumn]))))
 
@@ -278,6 +283,20 @@ def writeSNPlog(snpidmap, outputFile, logger, flagMap=None, dialect=None):
             pickle.dump(outputdata, f)
     return outputdata
 
+# edited by EG - start
+# Output each PRS for each sample in the form of [sample, *scores]
+def writePRSfull(prsFulls, snpidmap, thresholdlist, outputFile, samplenames=None):
+    for threshold in thresholdlist:
+        prsFullt = prsFulls[threshold]
+        prsFullt = prsFullt.toDF()
+        scorefile = outputFile+"_p"+str(threshold)+".snpscore.csv"
+        prsFullt = prsFullt.toDF(*samplenames)
+        prsFullt = prsFullt.toPandas()
+        prsFullt = prsFullt.assign(snps = snpidmap[threshold])
+        prsFullt = prsFullt.set_index('snps')
+        prsFullt.to_csv(scorefile)
+
+# edited by EG - end
 
 #def regression(scoreMap,phenoFile, phenoDelim, phenoColumns, phenoNoHeader, covarColumns, outputName, logger):
 #    samplesize=len(scoreMap[list(scoreMap.keys())[0]][1])
@@ -393,7 +412,9 @@ if __name__=="__main__":
     parser.add_argument("--check_dup", action="store_true", default=False, dest="checkdup", help="Add this flag to discard SNPs that are duplicated, which will take extra time. By default, the script will assume there are no duplicated SNPs.")
 
     parser.add_argument("--snp_log", action="store_true", default=False, dest="snp_log", help="Add this flag to record the SNPs that are used at each threshold. It will also report whether the A1 or A2 allele in the genotype data was used as reference for the risk effect. Any SNPs that meet the p-value threshold criteria but has allele names that do not match the allele names in the GWAS description are indicated in the 'discard' column. This record will be saved to a file with the name specified in the OUTPUT flag, with .snplog.csv as file extension.")
-
+# edited by EG - start
+    parser.add_argument("--snp_score", action="store_true", default=False, dest="snp_score", help="Add this flag to record the scores per SNP at each threshold. These scores will be saved to one file per threshold with the name specified in the OUTPUT flag, with .snpscore.csv as file extension.")
+# edited by EG - end
 
     results=parser.parse_args()
 
@@ -424,7 +445,10 @@ if __name__=="__main__":
 
     # Log file
     snp_log=results.snp_log
-    
+
+    # Full score file
+    snp_score=results.snp_score
+
     # Setting parameters
     gwas_id=results.gwas_id    # column of SNP ID
     gwas_p=results.gwas_p      # column of P value
@@ -474,7 +498,7 @@ if __name__=="__main__":
     sampleFileDelim=results.sample_delim  # sample File Delimiter
     sampleFileID=results.sample_ID   # which column in the sample file has the ID
     sample_skip=results.sample_skip       # how many lines to skip so that the sample names can be matched to the genotypes 1-to-1, taking into account the header of the sample file
-    
+
     # Output file information
     outputPath=results.OUTPUT
 
@@ -568,17 +592,17 @@ if __name__=="__main__":
         if check_ref:
             if use_a1f:
                 logger.info("Matching ambiguous SNPs between discovery GWAS and target genotype data using A1 frequencies")
-                
+
                 # organize genotype data table
                 genoA1f=genointermediate.map(lambda line: (line[geno_id], (line[geno_a1], line[geno_a1+1]), [float(x) for x in list(itertools.chain.from_iterable(line[5::]))])).map(lambda line: (line[0], line[1][0], line[1][1], getA1f(line[2]))).toDF(["Snpid_geno", "GenoA1", "GenoA2", "GenoA1f"])
-                
+
                 # organize GWAS data table
                 try:
                     gwasA1f=gwastable.rdd.map(lambda line:(line[gwas_id], line[gwas_a1], line[gwas_a2], line[gwas_a1f])).toDF(["Snpid_gwas", "GwasA1", "GwasA2", "GwasA1F"]) # 'GwasA1F' refers to the allele frequency of A1 in the GWAS
                 except:
                     logger.error("ERROR: Could not find A1 allele frequency column in GWAS file. Double check its column number. If it is absent, consider using --no_a1f flag to remove all ambiguous SNPs.")
                     raise("ERROR: Could not find A1 allele frequency column in GWAS file. Double check its column number. If it is absent, consider using --no_a1f flag to remove all ambiguous SNPs.")
-                
+
                 checktable=genoA1f.join(gwasA1f, genoA1f["Snpid_geno"]==gwasA1f["Snpid_gwas"], "inner").cache()
                 if checkDup:
                     logger.info("Searching and removing duplicated SNPs")
@@ -630,7 +654,7 @@ if __name__=="__main__":
                 except:
                     logger.error("ERROR: Could not find A1 allele frequency column in GWAS file. Double check its column number. If it is absent, consider using --no_a1f flag to remove all ambiguous SNPs.")
                     raise("ERROR: Could not find A1 allele frequency column in GWAS file. Double check its column number. If it is absent, consider using --no_a1f flag to remove all ambiguous SNPs.")
-                
+
                 checktable=genoA1f.join(gwasA1f, genoA1f["Snpid_geno"]==gwasA1f["Snpid_gwas"], "inner").cache()
                 if checkDup:
                     logger.info("Searching and removing duplicated SNPs")
@@ -679,21 +703,32 @@ if __name__=="__main__":
     assert len(genocalltable.first()[1])==samplesize, "Bug found, size of genotype and call table differ"
 
 
-
-    def calcPRSFromGeno(genotypeRDD, oddsMap, samplenum,calltable=False):
+# edited by EG - start
+    # def calcPRSFromGeno(genotypeRDD, oddsMap, samplenum,calltable=False):
+    #     assert calltable, "**** No call table found *****"
+    #     totalcount=calltable.map(lambda line: line[1]).reduce(lambda a,b: map(add, a, b))
+    #     multiplied=genotypeRDD.map(lambda line:[call * oddsMap[line[0]] for call in line[1]])
+    #     PRS=multiplied.reduce(lambda a,b: map(add, a, b))
+    #     normalizedPRS=[x/count if count != 0 else x for x, count in zip(PRS, totalcount)]
+    #     return (totalcount,normalizedPRS)
+    def calcPRSFromGenoPer(genotypeRDD, oddsMap, samplenum,calltable=False):
         assert calltable, "**** No call table found *****"
         totalcount=calltable.map(lambda line: line[1]).reduce(lambda a,b: map(add, a, b))
         multiplied=genotypeRDD.map(lambda line:[call * oddsMap[line[0]] for call in line[1]])
+        return (totalcount,multiplied)
+    def calcPRSFromGenoSum(totalcount, multiplied):
         PRS=multiplied.reduce(lambda a,b: map(add, a, b))
         normalizedPRS=[x/count if count != 0 else x for x, count in zip(PRS, totalcount)]
         return (totalcount,normalizedPRS)
-
+# edited by EG - end
     def calcAll(genotypeRDD, gwasRDD, thresholdlist, logsnp, samplenum,calltableRDD=False):
         logger.info("Started calculating PRS at each threshold")
         prsMap={}
         thresholdNoMaxSorted=sorted(thresholdlist, reverse=True)
         thresholdmax=max(thresholdlist)
         idlog={}
+        prsPer={} # edited by EG
+        prsTC={} # edited by EG
         start=time.time()
         for threshold in thresholdNoMaxSorted:
             tic=time.time()
@@ -708,16 +743,19 @@ if __name__=="__main__":
               #assert filteredcalltable.count()==filteredgenotype.count(), "Error, call table have different size from genotype"
               if logsnp:
                 idlog[threshold]=filteredgenotype.map(lambda line:line[0]).collect()
-
-              prsMap[threshold]=calcPRSFromGeno(filteredgenotype, gwasFilteredBC.value,samplenum=samplenum, calltable=filteredcalltable)
-
+# edited by EG - start
+              prsTC[threshold], prsPer[threshold]=calcPRSFromGenoPer(filteredgenotype, gwasFilteredBC.value,samplenum=samplenum, calltable=filteredcalltable)
+              prsMap[threshold]=calcPRSFromGenoSum(prsTC[threshold], prsPer[threshold])
+# edited by EG - end
               logger.info("Finished calculating PRS at threshold of {}. Time spent : {:.1f} seconds".format(str(threshold), time.time()-checkpoint))
 
             else:
               logger.warn("No SNPs left at threshold {}" .format(threshold))
-        return prsMap, idlog
+        return prsMap, idlog, prsPer # edited by EG
 
-    prsDict, snpids=calcAll(genotypeMax,gwastable, thresholds, logsnp=snp_log, samplenum=samplesize,calltableRDD=genocalltable)
+ # edited by EG - start
+    prsDict, snpids, prsFull=calcAll(genotypeMax,gwastable, thresholds, logsnp=snp_log, samplenum=samplesize,calltableRDD=genocalltable)
+
 
     # Log which SNPs are used in PRS
     if snp_log:
@@ -734,11 +772,14 @@ if __name__=="__main__":
     if sampleFilePath!="NOSAMPLE":
         # get sample name from the provided sample file
         subjNames=getSampleNames(sampleFilePath,sampleFileDelim,sampleFileID, skip=sample_skip)
-        
+
         logger.info("This sample file was used to provide sample ID : {}".format(sampleFilePath))
         output=writePRS(prsDict,  outputPath, logger, samplenames=subjNames)
+        if snp_score:
+            writePRSfull(prsFull, snpids, thresholds, outputPath, samplenames=subjNames[0][1:])
     else:
         output=writePRS(prsDict,  outputPath,logger=logger, samplenames=None)
+# edited by EG - end
 
 #
 #    if pheno_file is not None:
