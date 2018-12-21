@@ -98,10 +98,10 @@ def filterGWASByP(GWASRdd, pcolumn,  pHigh, oddscolumn,idcolumn, pLow=0, logOdds
 
 def filterGWASByP_DF(GWASdf, pcolumn,  pHigh, oddscolumn,idcolumn, pLow=0, logOdds=False):
     # edited by EG - start
-    if pHigh<1:
-        GWAS_Pfiltered=GWASdf.rdd.filter(lambda line: (float(line[pcolumn])<=pHigh) and (float(line[pcolumn])>=pLow))
-    else:
-        GWAS_Pfiltered=GWASdf
+    # if pHigh<1:
+    GWAS_Pfiltered=GWASdf.rdd.filter(lambda line: (float(line[pcolumn])<=pHigh) and (float(line[pcolumn])>=pLow))
+    # else:
+        # GWAS_Pfiltered=GWASdf
     # edited by EG - end
     if logOdds:
         GWAS_Odds=GWAS_Pfiltered.map(lambda line: (line[idcolumn],log(float(line[oddscolumn]))))
